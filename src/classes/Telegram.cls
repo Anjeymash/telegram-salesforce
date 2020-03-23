@@ -1,34 +1,20 @@
-//    MIT License
-//
-//    Copyright (c) 2017 Renato Oliveira
-//
-//    Permission is hereby granted, free of charge, to any person obtaining a copy
-//    of this software and associated documentation files (the "Software"), to deal
-//    in the Software without restriction, including without limitation the rights
-//    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-//    copies of the Software, and to permit persons to whom the Software is
-//    furnished to do so, subject to the following conditions:
-//
-//    The above copyright notice and this permission notice shall be included in all
-//    copies or substantial portions of the Software.
-//
-//    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-//    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-//    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-//    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-//    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-//    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-//    SOFTWARE.
+
 global class Telegram {
-    /**
-     * Send a message to a specific user using a bot.
-     *
-     * @param message Message to send
-     * @param bot_token Telegram Bot API Token
-     * @param telegram_id Telegram's Chat Identifier
-     */
+
     @future(callout=true)
-    global static void sendMessage (String message, String bot_token, String telegram_id) {
+    global static void sendCommentMessage(String messageId, String message, String bot_token, String telegram_id) {
+        HttpRequest req = new HttpRequest();
+        req.setEndpoint('https://api.telegram.org/bot' + bot_token + '/sendMessage');
+        req.setMethod('POST');
+        req.setHeader('content-type', 'application/json');
+        req.setBody('{"chat_id" : "' + telegram_id + '", "reply_to_message_id" : "' + messageId + '", "text" : "' + message + '"}');
+        Http http = new Http();
+        HttpResponse res = http.send(req);
+    }
+
+
+    @future(callout=true)
+    global static void sendMessage(String message, String bot_token, String telegram_id) {
         HttpRequest req = new HttpRequest();
         req.setEndpoint('https://api.telegram.org/bot' + bot_token + '/sendMessage');
         req.setMethod('POST');
@@ -38,24 +24,90 @@ global class Telegram {
         HttpResponse res = http.send(req);
     }
 
-    /**
-     * Send an error message to all assigned users to receive it.
-     *
-     * TODO:
-     * Check how many can receive at once. At the moment, tested with 6 messages being sent at
-     * the same time, and it worked, but might fail if there are too many users (10+ maybe?).
-     *
-     * @param message
-     */
-    global static void sendError (String message) {
-        String request_body = '';
+    global static void sendNotification(String message) {
         String bot_token = TelegramBot__c.getOrgDefaults().Token__c;
-        List<TelegramCredential__c> users= [SELECT
-            TelegramId__c
-            FROM TelegramCredential__c
-            WHERE ReceiveErrors__c = true];
+        List<TelegramCredential__c> users = [
+                SELECT
+                        TelegramId__c
+                FROM TelegramCredential__c
+                LIMIT 1
+        ];
         for (TelegramCredential__c user : users) {
             sendMessage(message, bot_token, user.TelegramId__c);
         }
     }
+
+
+    @future(callout=true)
+    global static void setPhoto(String userId, Id contactId) {
+        String fileId;
+        String filePath;
+        String botToken = TelegramBot__c.getOrgDefaults().Token__c;
+
+        HttpRequest req1 = new HttpRequest();
+        req1.setEndpoint('https://api.telegram.org/bot' + botToken + '/getUserProfilePhotos');
+        req1.setMethod('POST');
+        req1.setHeader('content-type', 'application/json');
+        req1.setBody('{"user_id" : "' + userId + '"}');
+        Http http1 = new Http();
+        HttpResponse res1 = http1.send(req1);
+        System.debug(res1.getBody());
+
+        if (res1.getStatusCode() == 200) {
+            TelegramResponse responseData = TelegramResponse.parse(res1.getBody());
+            if (!responseData.result.photos.isEmpty()) {
+                fileId = responseData.result.photos[0][0].file_id;
+            }
+        }
+        System.debug(fileId);
+
+        if (fileId != null) {
+            HttpRequest req2 = new HttpRequest();
+            req2.setEndpoint('https://api.telegram.org/bot' + botToken + '/getFile?file_id=' + fileId);
+            req2.setMethod('GET');
+            Http http2 = new Http();
+            HttpResponse res2 = http2.send(req2);
+            if (res2.getStatusCode() == 200) {
+                TelegramResponse data2 = TelegramResponse.parse(res2.getBody());
+                filePath = data2.result.file_path;
+            }
+        }
+        System.debug(filePath);
+
+        if (filePath != null) {
+            HttpRequest req3 = new HttpRequest();
+            req3.setEndpoint('https://api.telegram.org/file/bot' + botToken + '/' + filePath);
+            req3.setMethod('GET');
+            Http http3 = new Http();
+            HttpResponse res3 = http3.send(req3);
+            if (res3.getStatusCode() == 200) {
+                Blob txtEft = res3.getBodyAsBlob();
+                if (txtEft != null) {
+                    Attachment attach = new Attachment();
+                    attach.ParentId = contactId;
+                    attach.Name = 'UserPhoto';
+                    attach.Body = txtEft;
+                    System.debug(txtEft);
+                    try {
+                        insert attach;
+                        Contact con = new Contact(id = contactId);
+                        con.PhotoId__c = attach.Id;
+                        upsert con;
+                    } catch (DmlException e) {
+                        System.debug(e.getMessage());
+                    }
+
+                }
+            }
+        }
+    }
+
+    global static void manageImage(List<Contact> contacts) {
+        for (Contact contactItem : contacts) {
+            if (contactItem.telegramUserId__c != null && contactItem.PhotoId__c == null) {
+                setPhoto(contactItem.telegramUserId__c, contactItem.Id);
+            }
+        }
+    }
+
 }

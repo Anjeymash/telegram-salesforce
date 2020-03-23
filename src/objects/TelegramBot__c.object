@@ -4,15 +4,14 @@
     <enableFeeds>false</enableFeeds>
     <fields>
         <fullName>Token__c</fullName>
-        <caseSensitive>false</caseSensitive>
         <externalId>false</externalId>
         <label>Token</label>
         <length>255</length>
-        <required>false</required>
+        <required>true</required>
         <trackTrending>false</trackTrending>
         <type>Text</type>
-        <unique>true</unique>
+        <unique>false</unique>
     </fields>
-    <label>Telegram Bot Settings</label>
+    <label>TelegramBot</label>
     <visibility>Public</visibility>
 </CustomObject>
